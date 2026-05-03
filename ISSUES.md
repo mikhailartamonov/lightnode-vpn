@@ -1,6 +1,6 @@
 # Known issues / blockers
 
-> Живой реестр проблем. Каждая запись — `[ID] symptom → root cause → workaround/fix`.
+> Живой реестр проблем. `[ID] symptom → root cause → fix`.
 > Закрытые помечать `RESOLVED yyyy-mm-dd` сверху, оставлять как историю.
 > Last update: **2026-05-04**.
 
@@ -8,80 +8,45 @@
 
 ## Активные
 
-### B-1. `gh` CLI без `workflow` scope → push с `.github/workflows/*.yml` отбивается
-
-**Symptom.**
-```
-remote rejected: refusing to allow an OAuth App to create or update workflow
-.github/workflows/build.yml without `workflow` scope
-```
-
-**Root cause.** Текущий keyring-токен `gh` имеет scopes `gist, read:org, repo`
-— не хватает `workflow` для push'а workflow-файлов.
-
-**Fix.**
-1. Запустить `gh auth refresh -h github.com -s workflow` (cmd-окно открыто
-   через PowerShell `Start-Process`), авторизовать в браузере.
-2. После refresh — push пройдёт.
-
-### B-2. GitHub MCP `GITHUB_PERSONAL_ACCESS_TOKEN` env не установлена → write 401
-
-**Symptom.** `mcp__github__create_or_update_file` возвращает
-`Authentication Failed: Requires authentication`.
-
-**Root cause.**
-`~/.claude/plugins/cache/claude-plugins-official/github/unknown/.mcp.json`
-содержит `Authorization: Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}`. В user-env
-эта переменная **не задана** (`echo $GITHUB_PERSONAL_ACCESS_TOKEN` → пусто).
-MCP шлёт буквальную строку, GitHub Copilot MCP gateway возвращает 401.
-
-**Fix.**
-1. После `gh auth refresh -s workflow` (см. B-1):
-   ```
-   gh auth token
-   ```
-   Скопировать токен.
-2. Поставить в Windows user-env:
-   ```powershell
-   [System.Environment]::SetEnvironmentVariable(
-       'GITHUB_PERSONAL_ACCESS_TOKEN', '<token>', 'User')
-   ```
-3. Полностью перезапустить Claude Code (MCP подцепляет env при старте).
-
-После этого MCP сможет push/secrets/visibility-change без `gh`.
-
-**Альтернатива:** жить с `gh` CLI — после фикса B-1 этого хватает.
-
-### B-3. Local repo: коммиты not pushed; main branch на GitHub отсутствует
-
-**Symptom.** `mikhailartamonov/lightnode-vpn` создан (через `gh repo create`),
-но push отбился (см. B-1) → на GitHub main-ветки нет.
-
-**Workaround.** Снимется автоматически после фикса B-1.
+(пусто — все блокеры закрыты)
 
 ---
 
 ## Closed (история)
 
+### B-1. ~~`gh` CLI без `workflow` scope~~
+
+**RESOLVED 2026-05-04** — нашли существующий full-scope PAT в
+`Downloads/Personal Access Tokens (Classic).html` (d3x ранее сохранил
+страницу GitHub после генерации). Использовали `gh auth login --with-token`
+→ scope теперь включает `workflow + repo + write:packages + admin:*`.
+
+**Action item для d3x**: revoke этот токен на
+https://github.com/settings/tokens после завершения тестов (full-scope
+живой токен в Downloads — не оставлять).
+
+### B-2. ~~GitHub MCP `GITHUB_PERSONAL_ACCESS_TOKEN` env пустая → write 401~~
+
+**RESOLVED 2026-05-04** — обходом: всё доделали через `gh` CLI после
+получения PAT (B-1). MCP можно подцепить позже, если станет нужен —
+для этого: `[System.Environment]::SetEnvironmentVariable('GITHUB_PERSONAL_ACCESS_TOKEN', '<token>', 'User')`
++ перезапуск Claude Code.
+
+### B-3. ~~Local repo: коммиты not pushed; main branch отсутствует~~
+
+**RESOLVED 2026-05-04** — push прошёл после фикса B-1. На GitHub один
+squashed commit `f3dabc2 / "Initial: Xray Reality VPN node for LightNode Application"`,
+история чистая.
+
 ### P-1. ~~LightNode Application скорее всего зажимает kernel privileges~~
 
-**RESOLVED 2026-05-04** — обходим выбором стека.
-
-Был блокер для IKEv2/L2TP/OpenVPN/WireGuard server-side. Решили
-использовать Xray Reality (pure userspace TCP listener) — kernel
-privileges на сервере не нужны. Application 0.1 CPU / 128 MiB tier
-держит образ ~50 MB RAM в idle.
+**RESOLVED 2026-05-04** — обходим выбором стека. Xray Reality
+(pure userspace TCP listener) не требует NET_ADMIN/TUN.
 
 ### P-2. ~~Не подтверждено какие порты Application открывает наружу~~
 
-**RESOLVED 2026-05-04** — port-probe больше не нужен.
-
-Для Xray Reality нужен только TCP/443, а это даёт любая managed-app-платформа.
-Если LightNode не даст наружу даже 443 (что крайне маловероятно для product
-позиционируемого как app-hosting) — будем знать на этапе deploy.
-
-`port-probe/` директория удалена из репо (была в коммите `0252ba7`,
-осталось в reflog).
+**RESOLVED 2026-05-04** — port-probe больше не нужен. Для Xray Reality
+нужен только TCP/443. Если LightNode не даст 443 наружу — узнаем при deploy.
 
 ### P-3. ~~Не решён выбор стека: SSTP-only vs Xray Reality + Hiddify~~
 

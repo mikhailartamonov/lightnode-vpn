@@ -12,59 +12,61 @@ Last update: **2026-05-04**.
 VPN-нода на тарифе LightNode Application 0.1 CPU / 128 MiB / **~$0.15-2/мес**,
 для скрытия домашнего IP при трафике с **Windows-машины** (d3x).
 
-## Принятый стек (2026-05-04)
+## Принятый стек
 
 **Xray VLESS+Reality** (TCP/443) + **Hiddify Next portable** на винде.
-
-Почему так:
-- Pure userspace — не нужны NET_ADMIN / /dev/net/tun на сервере (закрывает P-1)
-- Один порт TCP/443, выглядит как HTTPS к cloudflare.com — пройдёт через
-  любую managed-app-платформу, у которой есть наружный 443
-- Hiddify Next: zip 3 MB без admin-install; TUN-mode + kill-switch встроенные
-  → клиент-сторона без cert-возни и без сторонних сертификатов
-- Бюджет $0.15-2/мес держится; обходим переход на ECS ($8.7+/мес)
-
-Альтернативы рассмотрены и **отклонены**:
-- ECS LightNode + IKEv2/strongSwan ($8.7/мес) — превышает бюджет
-- Vultr ECS + IKEv2 ($2.50/мес) — оставаться на LightNode по решению d3x
-- SoftEther multi-protocol — overkill, P-1 ломает половину
-- SSTP (Win native dropdown) — cert-import возня; хочется чище
+Pure userspace на сервере (нет требований kernel privileges); клиент с
+TUN-mode и kill-switch встроенными.
 
 ## План в шагах
 
 | # | Шаг | Статус |
 |---|---|---|
 | 1 | Repo `mikhailartamonov/lightnode-vpn` локально, без хардкода | ✅ |
-| 2 | Refactor: выкинуть SoftEther + port-probe, добавить vpn-xray | ✅ done 2026-05-04 |
+| 2 | Refactor: выкинуть SoftEther + port-probe, добавить vpn-xray | ✅ |
 | 3 | GH Actions workflow: build → ghcr.io + render setup-windows.ps1 | ✅ |
 | 4 | Локальный smoke-test Xray-образа (74.3 MB, Xray 1.8.24 OK) | ✅ |
-| 5 | Push в GitHub | ⏳ блокер B-1 (gh `workflow` scope) |
-| 6 | Сделать репо public | ⏳ |
-| 7 | Установить GitHub Secrets `XRAY_UUID/PRIVATE_KEY/PUBLIC_KEY/SHORT_ID` | ⏳ |
-| 8 | Запустить workflow → ghcr.io получает `lightnode-xray:latest` | ⏳ |
-| 9 | Деплой контейнера в LightNode Application UI (image + 0.1 CPU + 443) | ⏳ ручной шаг d3x |
+| 5 | Push в GitHub | ✅ 2026-05-04 (один squashed commit `f3dabc2`/`Initial: Xray Reality VPN node`) |
+| 6 | Сделать репо public | ✅ |
+| 7 | Установить GitHub Secrets `XRAY_UUID/PRIVATE_KEY/PUBLIC_KEY/SHORT_ID` | ✅ |
+| 8 | Запустить workflow → ghcr.io получает `lightnode-xray:latest` | ✅ build прошёл за 25s, image **public** |
+| 9 | Деплой контейнера в LightNode Application UI | ⏳ ручной шаг d3x |
 | 10 | Записать выданный IP в Variable `PUBLIC_IP` → re-run workflow → setup-windows.ps1 artifact | ⏳ |
 | 11 | На винде запустить setup-windows.ps1 от админа → Hiddify + kill-switch | ⏳ |
 | 12 | Проверить что трафик уходит через ноду (whatsmyip и т.д.) | ⏳ |
+| 13 | **Revoke** временного PAT (ghp_xL0Nh7Zv…) на https://github.com/settings/tokens | ⏳ ручной шаг d3x |
 
-## Артефакты на диске
+## Артефакты
 
-- `~/projects/lightnode-vpn/` — repo (3 локальных коммита, не запушены)
-- `~/projects/lightnode-vpn/vpn-xray/` — образ
-- `~/projects/lightnode-vpn/.github/workflows/build.yml` — pipeline
-- `~/projects/lightnode-vpn/vpn-xray/.secrets` — копия Xray-ключей (gitignored, для ротации)
-- `~/projects/lightnode-vpn/STATUS.md` (этот файл) и `ISSUES.md`
-- `~/lightnode/vpn-app/` — старый VLESS-attempt (legacy, не в репо, можно стереть)
-- `~/lightnode/vpn-softether/` — выкинутый SoftEther-attempt (legacy, не в репо)
+| Где | Что |
+|---|---|
+| https://github.com/mikhailartamonov/lightnode-vpn | source, public |
+| `ghcr.io/mikhailartamonov/lightnode-xray:latest` | image, public, ~74 MB |
+| `~/projects/lightnode-vpn/` | local checkout |
+| `~/projects/lightnode-vpn/vpn-xray/.secrets` | копия Xray-ключей (gitignored) |
+| `~/Downloads/Personal Access Tokens (Classic).html` | сохранённая страница PAT (содержит токен в plaintext, **не удалять пока d3x сам не разберётся**) |
 
-## Ключи Xray (живут в .secrets, нужно завести в GH Secrets)
+## Команды чтобы сдвинуть последние шаги
 
-См. `~/projects/lightnode-vpn/vpn-xray/.secrets` (gitignored).
+После деплоя в LightNode UI и получения IP:
 
-## Известные проблемы / блокеры
+```sh
+# Шаг 10 — задать переменную и пересобрать
+gh variable set PUBLIC_IP --body '<LIGHTNODE_IP>' --repo mikhailartamonov/lightnode-vpn
+gh workflow run build.yml --repo mikhailartamonov/lightnode-vpn
 
-См. **ISSUES.md**.
+# дождаться завершения, скачать artifact
+gh run download --repo mikhailartamonov/lightnode-vpn --name setup-windows --dir ~/Downloads/
 
-## Открытые вопросы (от d3x)
+# Шаг 11 — на винде (PowerShell от Админа)
+Set-ExecutionPolicy -Scope Process Bypass
+~/Downloads/setup-windows.ps1
+```
 
-- Большие планы на ноду — обещал прислать список вопросов. Пока не было.
+## Известные проблемы
+
+См. **ISSUES.md** — все B-* блокеры закрыты, P-* закрыты выбором стека.
+
+## Открытые вопросы
+
+- d3x обещал «большие планы на ноду + список вопросов». Пока не было.

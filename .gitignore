@@ -1,0 +1,11 @@
+.secrets
+*.local
+*.log
+*.mobileconfig
+*.ovpn
+*.ps1
+out/
+.env
+.env.local
+__pycache__/
+.DS_Store

@@ -1,0 +1,92 @@
+#requires -Version 5.1
+<#
+LightNode VPN — Windows setup
+- скачивает Hiddify Next portable .zip из GitHub Releases в %USERPROFILE%\hiddify-next
+- импортит готовый VLESS link
+- ставит Windows Firewall kill-switch (правила выключены, включить — Enable-KillSwitch)
+- запускает Hiddify
+
+Run elevated PowerShell:
+  Set-ExecutionPolicy -Scope Process Bypass
+  .\setup-windows.ps1
+#>
+
+$ErrorActionPreference = 'Stop'
+
+# === Подставлено CI при render-job из vars.PUBLIC_IP / secrets.XRAY_* ===
+$ServerIp     = '__PUBLIC_IP__'
+$XrayUuid     = '__XRAY_UUID__'
+$XrayPubKey   = '__XRAY_PUBLIC_KEY__'
+$XrayShortId  = '__XRAY_SHORT_ID__'
+$RealitySni   = '__REALITY_SNI__'
+
+$VlessLink = "vless://$XrayUuid@${ServerIp}:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$RealitySni&fp=chrome&pbk=$XrayPubKey&sid=$XrayShortId&type=tcp&headerType=none#lightnode-$ServerIp"
+
+# ---------- 1. Hiddify Next portable ----------
+$Dest = Join-Path $env:USERPROFILE 'hiddify-next'
+if (-not (Test-Path $Dest)) { New-Item -ItemType Directory -Path $Dest | Out-Null }
+
+Write-Host '==> Качаю Hiddify Next portable (latest release)' -ForegroundColor Cyan
+$rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/hiddify/hiddify-next/releases/latest'
+$asset = $rel.assets | Where-Object { $_.name -like '*Windows*Portable*.zip' -or $_.name -like '*windows*portable*.zip' } | Select-Object -First 1
+if (-not $asset) {
+    Write-Warning "Portable .zip не найден в last release. Открой https://github.com/hiddify/hiddify-next/releases вручную и распакуй в $Dest"
+} else {
+    $zip = Join-Path $env:TEMP $asset.name
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip -UseBasicParsing
+    Expand-Archive -Path $zip -DestinationPath $Dest -Force
+    Remove-Item $zip -Force
+    Write-Host ("    распаковано в {0}" -f $Dest) -ForegroundColor Green
+}
+
+# ---------- 2. VLESS link в файл (Hiddify импортит из буфера или файла) ----------
+$LinkFile = Join-Path $Dest 'lightnode.vless.txt'
+$VlessLink | Set-Content -Encoding UTF8 -Path $LinkFile
+Write-Host ("==> VLESS link записан в {0}" -f $LinkFile) -ForegroundColor Cyan
+Write-Host ('    также положу в буфер обмена — открой Hiddify, Tab "Profiles" → Add Profile from Clipboard')
+Set-Clipboard -Value $VlessLink
+
+# ---------- 3. IPv6 off (Reality чисто IPv4 — иначе IPv6 в обход) ----------
+Write-Host '==> Disable IPv6 на всех адаптерах' -ForegroundColor Cyan
+Get-NetAdapterBinding -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue | Disable-NetAdapterBinding -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue
+
+# ---------- 4. DNS lock на 1.1.1.1 / 9.9.9.9 ----------
+Write-Host '==> Lock DNS to 1.1.1.1 / 9.9.9.9' -ForegroundColor Cyan
+Get-DnsClientServerAddress -AddressFamily IPv4 | ForEach-Object {
+    Set-DnsClientServerAddress -InterfaceIndex $_.InterfaceIndex -ServerAddresses ('1.1.1.1','9.9.9.9') -ErrorAction SilentlyContinue
+}
+
+# ---------- 5. Firewall kill-switch (создаём ВЫКЛЮЧЕННЫМИ; Enable-KillSwitch включает) ----------
+Write-Host '==> Firewall kill-switch правила (off by default)' -ForegroundColor Cyan
+$rules = @(
+    @{ Name='LN-KS-DefaultDeny';     Action='Block'; Direction='Outbound'; Profile='Any' },
+    @{ Name='LN-KS-Allow-VPN';       Action='Allow'; Direction='Outbound'; Profile='Any';  RemoteAddress=$ServerIp },
+    @{ Name='LN-KS-Allow-LocalLAN';  Action='Allow'; Direction='Outbound'; Profile='Any';  RemoteAddress='LocalSubnet' },
+    @{ Name='LN-KS-Allow-DHCP';      Action='Allow'; Direction='Outbound'; Profile='Any';  Protocol='UDP'; RemotePort=67,68 },
+    @{ Name='LN-KS-Allow-DNS-Local'; Action='Allow'; Direction='Outbound'; Profile='Any';  Protocol='UDP'; RemoteAddress='LocalSubnet'; RemotePort=53 }
+)
+foreach ($r in $rules) {
+    Remove-NetFirewallRule -DisplayName $r.Name -ErrorAction SilentlyContinue
+    $null = New-NetFirewallRule -DisplayName $r.Name -Enabled False @r
+}
+# Default-deny только на физических адаптерах (не на TUN-интерфейсе Hiddify)
+Set-NetFirewallRule -DisplayName 'LN-KS-DefaultDeny' -InterfaceAlias '*Ethernet*','*Wi-Fi*','*Wireless*' -ErrorAction SilentlyContinue
+
+function Enable-KillSwitch {
+    Set-NetFirewallRule -DisplayName 'LN-KS-DefaultDeny','LN-KS-Allow-VPN','LN-KS-Allow-LocalLAN','LN-KS-Allow-DHCP','LN-KS-Allow-DNS-Local' -Enabled True
+    Write-Host 'Kill-switch ON: вне VPN — нет интернета' -ForegroundColor Yellow
+}
+function Disable-KillSwitch {
+    Set-NetFirewallRule -DisplayName 'LN-KS-DefaultDeny','LN-KS-Allow-VPN','LN-KS-Allow-LocalLAN','LN-KS-Allow-DHCP','LN-KS-Allow-DNS-Local' -Enabled False
+    Write-Host 'Kill-switch OFF' -ForegroundColor Yellow
+}
+
+Write-Host ''
+Write-Host '=========================================' -ForegroundColor Green
+Write-Host ('Hiddify Next: {0}' -f $Dest)
+Write-Host 'Дальше:'
+Write-Host '  1) Запусти Hiddify-Next.exe из распакованной папки.'
+Write-Host '  2) Profiles → Add Profile from Clipboard (link уже скопирован).'
+Write-Host '  3) Включи TUN mode (галка в Settings → Tunnel) — full-tunnel + kill-switch.'
+Write-Host '  4) Если хочешь жёсткий kill-switch со стороны Win Firewall:  Enable-KillSwitch'
+Write-Host '=========================================' -ForegroundColor Green

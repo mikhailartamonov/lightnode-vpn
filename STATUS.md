@@ -30,7 +30,7 @@ TUN-mode и kill-switch встроенными.
 | 6 | Сделать репо public | ✅ |
 | 7 | Установить GitHub Secrets `XRAY_UUID/PRIVATE_KEY/PUBLIC_KEY/SHORT_ID` | ✅ |
 | 8 | Запустить workflow → ghcr.io получает `lightnode-xray:latest` | ✅ build прошёл за 25s, image **public** |
-| 9 | Деплой контейнера в LightNode Application UI | ⏳ ручной шаг d3x |
+| 9 | ~~Деплой контейнера в LightNode Application UI~~ | ❌ **blocked by P-5** — Application не принимает custom Docker. Нужен другой target. См. ISSUES.md и блок ниже. |
 | 10 | Записать выданный IP в Variable `PUBLIC_IP` → re-run workflow → setup-windows.ps1 artifact | ⏳ |
 | 11 | На винде запустить setup-windows.ps1 от админа → Hiddify + kill-switch | ⏳ |
 | 12 | Проверить что трафик уходит через ноду (whatsmyip и т.д.) | ⏳ |
@@ -65,7 +65,22 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 ## Известные проблемы
 
-См. **ISSUES.md** — все B-* блокеры закрыты, P-* закрыты выбором стека.
+См. **ISSUES.md**. Активно: P-5 (Application не принимает custom Docker), B-4
+(Playwright session гибнет при ребуте). Закрыто: B-1..B-3, P-1..P-4.
+
+## Развилка по target hosting (2026-05-04)
+
+Application tier за $0.15/мес — мираж. Реальные пути:
+
+| # | Target | Цена/мес | Плюсы | Минусы |
+|---|---|---|---|---|
+| 1 | LightNode VPS Bangkok (1vCPU/2GB) | **$7.7** | один провайдер, наш образ работает as-is, тулз в `~/lightnode/` остаётся | бюджет $2-3 нарушен |
+| 2 | Vultr Tokyo/SG/FRA (1vCPU/512MB) | **$2.50** | бюджет ОК, full Docker | новый акк + новые тулз |
+| 3 | LightNode pre-built WireGuard на VPS | $7.7 | один-клик деплой, не нужен наш custom образ | свой образ Xray не используется |
+
+Жду от d3x явного выбора. По умолчанию рекомендую **#1**: проще всего здесь
+и сейчас (баланса хватит на месяц), потом можно мигрировать если бюджет
+останется $2-3 надолго.
 
 ## Открытые вопросы
 
